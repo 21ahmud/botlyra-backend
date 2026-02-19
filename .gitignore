@@ -1,11 +1,14 @@
-# 2. Create proper .gitignore
+# 2. Update .gitignore to include them
 @"
 node_modules/
 .env
 *.log
 venv/
 *.pth
+*.py
 *.dll
 *.lib
+*.db
+*.txt
 hello-fly/
 "@ | Out-File -FilePath .gitignore -Encoding utf8 -NoNewline
