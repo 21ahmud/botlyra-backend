@@ -17,7 +17,6 @@ app.use(helmet({
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
-    
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:5173',
@@ -27,11 +26,9 @@ app.use(cors({
       'https://botlyra-ai.firebaseapp.com',
       process.env.FRONTEND_URL
     ].filter(Boolean);
-    
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.log('Request from non-whitelisted origin:', origin);
       callback(null, true);
     }
   },
@@ -40,8 +37,9 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-const botChatsRouter = require('./routes/bot-chats');
-app.use('/api/bot-chats', botChatsRouter);
+app.use(cookieParser());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -59,10 +57,6 @@ const apiLimiter = rateLimit({
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/signup', authLimiter);
 app.use('/api/', apiLimiter);
-
-app.use(cookieParser());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, res, next) => {
@@ -87,6 +81,7 @@ const busibotsRoutes = require('./routes/busibots');
 const customBotsRoutes = require('./routes/custombots');
 const adminRoutes = require('./routes/admin');
 const botIntegrationsRoutes = require('./routes/botIntegrations');
+const botChatsRouter = require('./routes/bot-chats');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -96,12 +91,13 @@ app.use('/api/busibots', busibotsRoutes);
 app.use('/api/custombots', customBotsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', botIntegrationsRoutes);
+app.use('/api/bot-chats', botChatsRouter);
 
 app.get('/api/health', async (req, res) => {
   try {
     const dbCheck = await pool.query('SELECT 1');
-    res.json({ 
-      status: 'ok', 
+    res.json({
+      status: 'ok',
       timestamp: new Date().toISOString(),
       database: 'postgresql',
       dbStatus: dbCheck.rows.length > 0 ? 'connected' : 'disconnected',
@@ -119,21 +115,16 @@ app.get('/api/health', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({
-    message: 'Botlyra API Server',
-    version: '1.0.0'
-  });
+  res.json({ message: 'Botlyra API Server', version: '1.0.0' });
 });
 
 app.use((err, req, res, next) => {
   console.error('Error:', err.stack);
-  
   const statusCode = err.statusCode || err.status || 500;
   const message = err.message || 'Internal Server Error';
-  
   res.status(statusCode).json({
     error: {
-      message: process.env.NODE_ENV === 'production' 
+      message: process.env.NODE_ENV === 'production'
         ? (statusCode === 500 ? 'Internal Server Error' : message)
         : message,
       status: statusCode
@@ -142,13 +133,13 @@ app.use((err, req, res, next) => {
 });
 
 app.use((req, res) => {
-  res.status(404).json({ 
-    error: { 
-      message: 'Route not found', 
+  res.status(404).json({
+    error: {
+      message: 'Route not found',
       status: 404,
       path: req.path,
       method: req.method
-    } 
+    }
   });
 });
 
@@ -157,20 +148,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-process.on('SIGTERM', () => {
-  server.close(() => {
-    pool.end(() => {
-      process.exit(0);
-    });
-  });
-});
-
-process.on('SIGINT', () => {
-  server.close(() => {
-    pool.end(() => {
-      process.exit(0);
-    });
-  });
-});
+process.on('SIGTERM', () => { server.close(() => { pool.end(() => { process.exit(0); }); }); });
+process.on('SIGINT', () => { server.close(() => { pool.end(() => { process.exit(0); }); }); });
 
 module.exports = app;
