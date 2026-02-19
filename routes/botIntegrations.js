@@ -48,44 +48,34 @@ router.post('/bot-integrations', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/bot-integrations/by-name/:name', authenticateToken, async (req, res) => {
+router.get('/bot-integrations/stats', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const integrationName = req.params.name;
     
     const result = await pool.query(
-      'DELETE FROM bot_integrations WHERE user_id = $1 AND integration_name = $2 RETURNING *',
-      [userId, integrationName]
+      `SELECT 
+         COUNT(DISTINCT integration_name) as total_integrations,
+         COUNT(DISTINCT bot_id) as total_connected_bots,
+         COUNT(*) as total_connections,
+         integration_name,
+         COUNT(*) as connection_count
+       FROM bot_integrations 
+       WHERE user_id = $1 AND status = 'active'
+       GROUP BY integration_name`,
+      [userId]
     );
     
-    res.json({ 
-      message: 'Integration disconnected successfully',
-      deleted: result.rowCount
-    });
+    const stats = {
+      totalIntegrations: result.rows.length,
+      totalConnectedBots: result.rows.length > 0 ? result.rows[0].total_connected_bots : 0,
+      totalConnections: result.rows.reduce((sum, row) => sum + parseInt(row.connection_count), 0),
+      integrations: result.rows
+    };
+    
+    res.json(stats);
   } catch (error) {
-    console.error('Error disconnecting integration:', error);
-    res.status(500).json({ error: 'Failed to disconnect integration' });
-  }
-});
-
-router.delete('/bot-integrations/:id', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const integrationId = req.params.id;
-    
-    const result = await pool.query(
-      'DELETE FROM bot_integrations WHERE id = $1 AND user_id = $2 RETURNING *',
-      [integrationId, userId]
-    );
-    
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Integration not found' });
-    }
-    
-    res.json({ message: 'Integration deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting integration:', error);
-    res.status(500).json({ error: 'Failed to delete integration' });
+    console.error('Error fetching integration stats:', error);
+    res.status(500).json({ error: 'Failed to fetch integration stats' });
   }
 });
 
@@ -103,6 +93,26 @@ router.get('/bot-integrations/bot/:botId', authenticateToken, async (req, res) =
   } catch (error) {
     console.error('Error fetching bot integrations:', error);
     res.status(500).json({ error: 'Failed to fetch bot integrations' });
+  }
+});
+
+router.delete('/bot-integrations/by-name/:name', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const integrationName = req.params.name;
+    
+    const result = await pool.query(
+      'DELETE FROM bot_integrations WHERE user_id = $1 AND integration_name = $2 RETURNING *',
+      [userId, integrationName]
+    );
+    
+    res.json({ 
+      message: 'Integration disconnected successfully',
+      deleted: result.rowCount
+    });
+  } catch (error) {
+    console.error('Error disconnecting integration:', error);
+    res.status(500).json({ error: 'Failed to disconnect integration' });
   }
 });
 
@@ -133,34 +143,24 @@ router.put('/bot-integrations/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/bot-integrations/stats', authenticateToken, async (req, res) => {
+router.delete('/bot-integrations/:id', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
+    const integrationId = req.params.id;
     
     const result = await pool.query(
-      `SELECT 
-         COUNT(DISTINCT integration_name) as total_integrations,
-         COUNT(DISTINCT bot_id) as total_connected_bots,
-         COUNT(*) as total_connections,
-         integration_name,
-         COUNT(*) as connection_count
-       FROM bot_integrations 
-       WHERE user_id = $1 AND status = 'active'
-       GROUP BY integration_name`,
-      [userId]
+      'DELETE FROM bot_integrations WHERE id = $1 AND user_id = $2 RETURNING *',
+      [integrationId, userId]
     );
     
-    const stats = {
-      totalIntegrations: result.rows.length,
-      totalConnectedBots: result.rows.length > 0 ? result.rows[0].total_connected_bots : 0,
-      totalConnections: result.rows.reduce((sum, row) => sum + parseInt(row.connection_count), 0),
-      integrations: result.rows
-    };
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Integration not found' });
+    }
     
-    res.json(stats);
+    res.json({ message: 'Integration deleted successfully' });
   } catch (error) {
-    console.error('Error fetching integration stats:', error);
-    res.status(500).json({ error: 'Failed to fetch integration stats' });
+    console.error('Error deleting integration:', error);
+    res.status(500).json({ error: 'Failed to delete integration' });
   }
 });
 
