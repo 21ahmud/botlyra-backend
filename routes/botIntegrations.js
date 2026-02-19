@@ -27,24 +27,26 @@ router.post('/bot-integrations', authenticateToken, async (req, res) => {
     if (!bot_id || !integration_name) {
       return res.status(400).json({ error: 'bot_id and integration_name are required' });
     }
+
+    const configValue = JSON.stringify(integration_config || {});
     
     const result = await pool.query(
       `INSERT INTO bot_integrations 
        (bot_id, user_id, integration_name, status, integration_config) 
-       VALUES ($1, $2, $3, $4, $5) 
+       VALUES ($1, $2, $3, $4, $5::jsonb) 
        ON CONFLICT (bot_id, integration_name) 
        DO UPDATE SET 
          status = $4, 
-         integration_config = $5,
+         integration_config = $5::jsonb,
          updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
-      [bot_id, userId, integration_name, status || 'active', integration_config || {}]
+      [bot_id, userId, integration_name, status || 'active', configValue]
     );
     
     res.status(201).json(result.rows[0]);
   } catch (error) {
-    console.error('Error creating integration:', error);
-    res.status(500).json({ error: 'Failed to create integration' });
+    console.error('Error creating integration:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
