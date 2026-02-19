@@ -82,13 +82,11 @@ router.post('/:botId/messages', authenticateToken, async (req, res) => {
     );
     
     // Update bot message count and last activity
-    await client.query(
-      `UPDATE bots 
-       SET message_count = message_count + 1,
-           last_activity_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
-      [req.params.botId]
-    );
+    await query(
+  `UPDATE bots SET message_count = message_count + 1, last_activity_at = CURRENT_TIMESTAMP WHERE id = $1;
+   UPDATE custom_bots SET updated_at = CURRENT_TIMESTAMP WHERE id = $1;`,
+  [req.params.botId]
+);
     
     await client.query('COMMIT');
     
