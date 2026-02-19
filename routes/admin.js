@@ -28,6 +28,10 @@ const getPlanFeatures = (planType) => {
   return features[planType] || features.free;
 };
 
+router.get('/revenue-test', (req, res) => {
+  res.json({ ok: true, message: 'Admin routes working' });
+});
+
 router.get('/users', authenticateToken, isAdmin, async (req, res) => {
   try {
     const result = await query(
@@ -201,8 +205,6 @@ router.post('/users', authenticateToken, isAdmin, async (req, res) => {
   }
 });
 
-// ⚠️ IMPORTANT: /users/bulk MUST be defined BEFORE /users/:userId
-// otherwise Express matches "bulk" as a :userId param
 router.put('/users/bulk', authenticateToken, isAdmin, async (req, res) => {
   const client = await getClient();
   try {
