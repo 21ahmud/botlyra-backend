@@ -31,7 +31,7 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.log('⚠️ Request from non-whitelisted origin:', origin);
+      console.log('Request from non-whitelisted origin:', origin);
       callback(null, true);
     }
   },
@@ -73,9 +73,9 @@ if (process.env.NODE_ENV !== 'production') {
 
 pool.query('SELECT NOW()', (err, res) => {
   if (err) {
-    console.error('❌ Database connection error:', err);
+    console.error('Database connection error:', err);
   } else {
-    console.log('✅ Database connected at:', res.rows[0].now);
+    console.log('Database connected at:', res.rows[0].now);
   }
 });
 
@@ -121,41 +121,24 @@ app.get('/api/health', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     message: 'Botlyra API Server',
-    version: '1.0.0',
-    endpoints: {
-      health: '/api/health',
-      auth: '/api/auth',
-      users: '/api/users',
-      subscriptions: '/api/subscriptions',
-      bots: '/api/bots',
-      busibots: '/api/busibots',
-      custombots: '/api/custombots',
-      admin: '/api/admin',
-      botIntegrations: '/api/bot-integrations'
-    }
+    version: '1.0.0'
   });
 });
 
 app.use((err, req, res, next) => {
-  console.error('❌ Error:', err.stack);
+  console.error('Error:', err.stack);
   
   const statusCode = err.statusCode || err.status || 500;
   const message = err.message || 'Internal Server Error';
   
-  const errorResponse = {
+  res.status(statusCode).json({
     error: {
       message: process.env.NODE_ENV === 'production' 
         ? (statusCode === 500 ? 'Internal Server Error' : message)
         : message,
       status: statusCode
     }
-  };
-  
-  if (process.env.NODE_ENV !== 'production') {
-    errorResponse.error.stack = err.stack;
-  }
-  
-  res.status(statusCode).json(errorResponse);
+  });
 });
 
 app.use((req, res) => {
@@ -169,45 +152,25 @@ app.use((req, res) => {
   });
 });
 
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  server.close(() => {
-    console.log('HTTP server closed');
-    pool.end(() => {
-      console.log('Database pool closed');
-   process.exit(0);
-    });
-  });
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-process.on('SIGINT', () => {
-  console.log('SIGINT signal received: closing HTTP server');
+process.on('SIGTERM', () => {
   server.close(() => {
-    console.log('HTTP server closed');
     pool.end(() => {
-      console.log('Database pool closed');
       process.exit(0);
     });
   });
 });
 
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log('');
-  console.log('🚀 ========================================');
-  console.log(`📡 Server running on port ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 API URL: http://localhost:${PORT}`);
-  console.log(`🎯 Accepting requests from:`);
-  console.log(`   - http://localhost:3000`);
-  console.log(`   - http://localhost:5173`);
-  console.log(`   - https://botlyra-ai.web.app`);
-  console.log(`   - https://botlyra-ai.firebaseapp.com`);
-  console.log(`🤖 Bot routes: /api/bots, /api/busibots, /api/custombots`);
-  console.log(`🔌 Bot integrations route: /api/bot-integrations`);
-  console.log(`👤 Admin route: /api/admin`);
-  console.log(`🍪 Cookie-based authentication enabled`);
-  console.log('🚀 ========================================');
-  console.log('');
+process.on('SIGINT', () => {
+  server.close(() => {
+    pool.end(() => {
+      process.exit(0);
+    });
+  });
 });
 
 module.exports = app;

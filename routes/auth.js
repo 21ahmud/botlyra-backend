@@ -6,11 +6,9 @@ const { query, getClient } = require('../config/db');
 const router = express.Router();
 
 if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
-  console.error('❌ ERROR: JWT_SECRET and JWT_REFRESH_SECRET must be set in .env file');
+  console.error('JWT_SECRET and JWT_REFRESH_SECRET must be set in .env file');
   process.exit(1);
 }
-
-console.log('✅ JWT secrets configured');
 
 const generateTokens = (userId) => {
   const accessToken = jwt.sign(
@@ -96,28 +94,51 @@ const getPlanFeatures = (plan) => {
 };
 
 const setAuthCookies = (res, accessToken, refreshToken) => {
-  res.cookie('accessToken', accessToken, {
+  const cookieOptions = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
-    maxAge: 15 * 60 * 1000
+    secure: true,
+    sameSite: 'none',
+  };
+
+  res.cookie('accessToken', accessToken, {
+    ...cookieOptions,
+    maxAge: 15 * 60 * 1000,
   });
   
   res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000
+    ...cookieOptions,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 };
 
 const clearAuthCookies = (res) => {
-  res.clearCookie('accessToken');
-  res.clearCookie('refreshToken');
+  const options = { httpOnly: true, secure: true, sameSite: 'none' };
+  res.clearCookie('accessToken', options);
+  res.clearCookie('refreshToken', options);
+};
+
+const authenticateToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const headerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const token = headerToken || req.cookies.accessToken;
+    
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(403).json({ error: 'Token expired' });
+    }
+    return res.status(403).json({ error: 'Invalid token' });
+  }
 };
 
 router.post('/signup', async (req, res) => {
-  console.log('📝 Signup request received');
   let client;
   
   try {
@@ -216,6 +237,7 @@ router.post('/signup', async (req, res) => {
     setAuthCookies(res, accessToken, refreshToken);
     
     res.status(201).json({
+      accessToken,
       user: {
         id: user.id,
         email: user.email,
@@ -234,18 +256,10 @@ router.post('/signup', async (req, res) => {
     
   } catch (error) {
     console.error('Signup error:', error);
-    
-    if (client) {
-      await client.query('ROLLBACK');
-    }
-    
-    res.status(500).json({ 
-      error: 'Failed to create account'
-    });
+    if (client) await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Failed to create account' });
   } finally {
-    if (client) {
-      client.release();
-    }
+    if (client) client.release();
   }
 });
 
@@ -305,6 +319,7 @@ router.post('/login', async (req, res) => {
     setAuthCookies(res, accessToken, refreshToken);
     
     res.json({
+      accessToken,
       user: {
         id: user.id,
         email: user.email,
@@ -373,25 +388,6 @@ router.post('/logout', async (req, res) => {
     res.status(500).json({ error: 'Failed to logout' });
   }
 });
-
-const authenticateToken = async (req, res, next) => {
-  try {
-    const token = req.cookies.accessToken;
-    
-    if (!token) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-    
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (error) {
-    if (error.name === 'TokenExpiredError') {
-      return res.status(403).json({ error: 'Token expired' });
-    }
-    return res.status(403).json({ error: 'Invalid token' });
-  }
-};
 
 router.get('/me', authenticateToken, async (req, res) => {
   try {
@@ -471,3 +467,4 @@ router.get('/me', authenticateToken, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.authenticateToken = authenticateToken;
