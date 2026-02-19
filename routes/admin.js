@@ -22,7 +22,7 @@ const getPlanFeatures = (planType) => {
   const features = {
     free: { advanced_analytics: false, unlimited_bots: false, priority_support: false, custom_branding: false, api_access: false, export_data: false, white_label: false, dedicated_support: false, custom_integrations: false, enterprise_security: false, custom_ai: false, global_cdn: false, multi_tenant: false },
     professional: { advanced_analytics: true, unlimited_bots: true, priority_support: true, custom_branding: true, api_access: true, export_data: true, white_label: false, dedicated_support: false, custom_integrations: true, enterprise_security: false, custom_ai: false, global_cdn: false, multi_tenant: false },
-    business: { advanced_analytics: true, unlimited_bots: true, priority_support: true, custom_branding: true, api_access: true, export_data: true, white_label: true, dedicated_support: true, custom_integrations: true, enterprise_security: false, custom_ai: false, global_cdn: false, multi_tenant: false },
+    business: { advanced_analytics: true, unlimited_bots: true, priority_support: true, custom_branding: false, api_access: true, export_data: true, white_label: false, dedicated_support: false, custom_integrations: false, enterprise_security: false, custom_ai: false, global_cdn: false, multi_tenant: false },
     custom: { advanced_analytics: true, unlimited_bots: true, priority_support: true, custom_branding: true, api_access: true, export_data: true, white_label: true, dedicated_support: true, custom_integrations: true, enterprise_security: true, custom_ai: true, global_cdn: true, multi_tenant: true }
   };
   return features[planType] || features.free;
@@ -96,19 +96,18 @@ router.get('/users', authenticateToken, isAdmin, async (req, res) => {
 router.get('/revenue', authenticateToken, isAdmin, async (req, res) => {
   try {
     const result = await query(
-      `SELECT s.plan, s.status, s.custom_price, s.created_at
+      `SELECT s.plan, s.status, s.custom_price
        FROM subscriptions s
        JOIN users u ON u.id = s.user_id
        WHERE s.status = 'active'`
     );
 
-    let totalMonthlyRevenue = 0;
-    let totalAnnualRevenue = 0;
-    const breakdown = { 
-      free: { count: 0, revenue: 0, pricePerUser: 0 }, 
-      professional: { count: 0, revenue: 0, pricePerUser: 29 }, 
-      business: { count: 0, revenue: 0, pricePerUser: 99 }, 
-      custom: { count: 0, revenue: 0, pricePerUser: null } 
+    let totalRevenue = 0;
+    const breakdown = {
+      free: { count: 0, revenue: 0, pricePerUser: 0 },
+      professional: { count: 0, revenue: 0, pricePerUser: 29 },
+      business: { count: 0, revenue: 0, pricePerUser: 99 },
+      custom: { count: 0, revenue: 0, pricePerUser: null }
     };
 
     result.rows.forEach(row => {
@@ -116,37 +115,20 @@ router.get('/revenue', authenticateToken, isAdmin, async (req, res) => {
       if (!breakdown[plan]) return;
       breakdown[plan].count += 1;
 
-      if (plan === 'professional') { 
-        breakdown.professional.revenue += 29; 
-        totalMonthlyRevenue += 29;
-        totalAnnualRevenue += 29 * 12;
-      }
-      else if (plan === 'business') { 
-        breakdown.business.revenue += 99; 
-        totalMonthlyRevenue += 99;
-        totalAnnualRevenue += 99 * 12;
-      }
-      else if (plan === 'custom' && row.custom_price) {
+      if (plan === 'professional') {
+        breakdown.professional.revenue += 29;
+        totalRevenue += 29;
+      } else if (plan === 'business') {
+        breakdown.business.revenue += 99;
+        totalRevenue += 99;
+      } else if (plan === 'custom' && row.custom_price) {
         const price = parseFloat(row.custom_price);
         breakdown.custom.revenue += price;
-        totalMonthlyRevenue += price;
-        totalAnnualRevenue += price * 12;
+        totalRevenue += price;
       }
     });
 
-    const monthlyBreakdown = {
-      professional: { count: breakdown.professional.count, revenue: breakdown.professional.revenue },
-      business: { count: breakdown.business.count, revenue: breakdown.business.revenue },
-      custom: { count: breakdown.custom.count, revenue: breakdown.custom.revenue },
-      free: { count: breakdown.free.count, revenue: 0 }
-    };
-
-    res.json({ 
-      totalMonthlyRevenue, 
-      totalAnnualRevenue,
-      monthlyBreakdown,
-      breakdown 
-    });
+    res.json({ totalMonthlyRevenue: totalRevenue, breakdown });
   } catch (error) {
     console.error('Revenue error:', error);
     res.status(500).json({ error: 'Failed to calculate revenue' });
@@ -204,12 +186,64 @@ router.post('/users', authenticateToken, isAdmin, async (req, res) => {
     res.status(201).json({
       id: user.id, email: user.email, name: user.name, phone: user.phone,
       company: user.company, role: user.role,
-      subscription: { plan: subscription.plan, status: subscription.status, customPrice: subscription.custom_price ? parseFloat(subscription.custom_price) : null }
+      subscription: {
+        plan: subscription.plan,
+        status: subscription.status,
+        customPrice: subscription.custom_price ? parseFloat(subscription.custom_price) : null
+      }
     });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Create user error:', error);
     res.status(500).json({ error: 'Failed to create user' });
+  } finally {
+    client.release();
+  }
+});
+
+// ⚠️ IMPORTANT: /users/bulk MUST be defined BEFORE /users/:userId
+// otherwise Express matches "bulk" as a :userId param
+router.put('/users/bulk', authenticateToken, isAdmin, async (req, res) => {
+  const client = await getClient();
+  try {
+    const { userIds, action } = req.body;
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({ error: 'User IDs are required' });
+    }
+
+    await client.query('BEGIN');
+
+    switch (action) {
+      case 'activate':
+        await client.query(
+          `UPDATE subscriptions SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE user_id = ANY($1::uuid[])`,
+          [userIds]
+        );
+        break;
+      case 'deactivate':
+        await client.query(
+          `UPDATE subscriptions SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE user_id = ANY($1::uuid[])`,
+          [userIds]
+        );
+        break;
+      case 'delete':
+        if (userIds.includes(req.user.userId)) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Cannot delete your own account' });
+        }
+        await client.query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [userIds]);
+        break;
+      default:
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Invalid action' });
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'Bulk action completed successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Bulk action error:', error);
+    res.status(500).json({ error: 'Failed to perform bulk action' });
   } finally {
     client.release();
   }
@@ -233,11 +267,16 @@ router.put('/users/:userId', authenticateToken, isAdmin, async (req, res) => {
     );
 
     if (plan !== undefined || isActive !== undefined) {
-      const subscriptionResult = await client.query(`SELECT id FROM subscriptions WHERE user_id = $1`, [userId]);
+      const subscriptionResult = await client.query(
+        `SELECT id FROM subscriptions WHERE user_id = $1`,
+        [userId]
+      );
 
       if (subscriptionResult.rows.length > 0) {
         const subscriptionId = subscriptionResult.rows[0].id;
-        const priceToStore = plan === 'custom' && customPrice !== null ? parseFloat(customPrice) : (plan !== 'custom' ? null : undefined);
+        const priceToStore = plan === 'custom' && customPrice !== null
+          ? parseFloat(customPrice)
+          : (plan !== 'custom' ? null : undefined);
 
         if (plan !== undefined) {
           await client.query(
@@ -285,44 +324,6 @@ router.delete('/users/:userId', authenticateToken, isAdmin, async (req, res) => 
   } catch (error) {
     console.error('Delete user error:', error);
     res.status(500).json({ error: 'Failed to delete user' });
-  }
-});
-
-router.put('/users/bulk', authenticateToken, isAdmin, async (req, res) => {
-  const client = await getClient();
-  try {
-    const { userIds, action } = req.body;
-    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) return res.status(400).json({ error: 'User IDs are required' });
-
-    await client.query('BEGIN');
-
-    switch (action) {
-      case 'activate':
-        await client.query(`UPDATE subscriptions SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE user_id = ANY($1::uuid[])`, [userIds]);
-        break;
-      case 'deactivate':
-        await client.query(`UPDATE subscriptions SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE user_id = ANY($1::uuid[])`, [userIds]);
-        break;
-      case 'delete':
-        if (userIds.includes(req.user.userId)) {
-          await client.query('ROLLBACK');
-          return res.status(400).json({ error: 'Cannot delete your own account' });
-        }
-        await client.query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [userIds]);
-        break;
-      default:
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: 'Invalid action' });
-    }
-
-    await client.query('COMMIT');
-    res.json({ message: 'Bulk action completed successfully' });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Bulk action error:', error);
-    res.status(500).json({ error: 'Failed to perform bulk action' });
-  } finally {
-    client.release();
   }
 });
 
