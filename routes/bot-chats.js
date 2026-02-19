@@ -4,16 +4,14 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Get messages for a bot chat
 router.get('/:botId', authenticateToken, async (req, res) => {
   try {
-    // Verify bot ownership
     const botCheck = await query(
-  `SELECT id FROM bots WHERE id = $1 AND user_id = $2
-   UNION
-   SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
-  [req.params.botId, req.user.userId]
-);
+      `SELECT id FROM bots WHERE id = $1 AND user_id = $2
+       UNION
+       SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
+      [req.params.botId, req.user.userId]
+    );
     
     if (botCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Bot not found' });
@@ -35,7 +33,6 @@ router.get('/:botId', authenticateToken, async (req, res) => {
   }
 });
 
-// Send a message
 router.post('/:botId/messages', authenticateToken, async (req, res) => {
   const client = await getClient();
   
@@ -52,13 +49,12 @@ router.post('/:botId/messages', authenticateToken, async (req, res) => {
     
     await client.query('BEGIN');
     
-    // Verify bot ownership
-    const botCheck = await query(
-  `SELECT id FROM bots WHERE id = $1 AND user_id = $2
-   UNION
-   SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
-  [req.params.botId, req.user.userId]
-);
+    const botCheck = await client.query(
+      `SELECT id FROM bots WHERE id = $1 AND user_id = $2
+       UNION
+       SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
+      [req.params.botId, req.user.userId]
+    );
     
     if (botCheck.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -81,15 +77,15 @@ router.post('/:botId/messages', authenticateToken, async (req, res) => {
       ]
     );
     
-    // Update bot message count and last activity
-    await query(
-  `UPDATE bots SET message_count = message_count + 1, last_activity_at = CURRENT_TIMESTAMP WHERE id = $1`,
-  [req.params.botId]
-);
-await query(
-  `UPDATE custom_bots SET updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-  [req.params.botId]
-);
+    await client.query(
+      `UPDATE bots SET message_count = message_count + 1, last_activity_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [req.params.botId]
+    );
+    
+    await client.query(
+      `UPDATE custom_bots SET updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [req.params.botId]
+    );
     
     await client.query('COMMIT');
     
@@ -104,7 +100,6 @@ await query(
   }
 });
 
-// Initialize bot chat with welcome message
 router.post('/:botId/initialize', authenticateToken, async (req, res) => {
   const client = await getClient();
   
@@ -113,9 +108,10 @@ router.post('/:botId/initialize', authenticateToken, async (req, res) => {
     
     await client.query('BEGIN');
     
-    // Verify bot ownership
     const botCheck = await client.query(
-      'SELECT id, name FROM bots WHERE id = $1 AND user_id = $2',
+      `SELECT id, name FROM bots WHERE id = $1 AND user_id = $2
+       UNION
+       SELECT id, name FROM custom_bots WHERE id = $1 AND user_id = $2`,
       [req.params.botId, req.user.userId]
     );
     
@@ -126,7 +122,6 @@ router.post('/:botId/initialize', authenticateToken, async (req, res) => {
     
     const bot = botCheck.rows[0];
     
-    // Check if already initialized
     const existingMessages = await client.query(
       'SELECT id FROM bot_chat_messages WHERE bot_id = $1 AND user_id = $2 LIMIT 1',
       [req.params.botId, req.user.userId]
@@ -137,7 +132,6 @@ router.post('/:botId/initialize', authenticateToken, async (req, res) => {
       return res.json({ message: 'Chat already initialized' });
     }
     
-    // Create welcome message
     const result = await client.query(
       `INSERT INTO bot_chat_messages (
         bot_id, user_id, message, sender, ai_metadata
@@ -166,16 +160,14 @@ router.post('/:botId/initialize', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete all messages for a bot chat
 router.delete('/:botId', authenticateToken, async (req, res) => {
   try {
-    // Verify bot ownership
     const botCheck = await query(
-  `SELECT id FROM bots WHERE id = $1 AND user_id = $2
-   UNION
-   SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
-  [req.params.botId, req.user.userId]
-);
+      `SELECT id FROM bots WHERE id = $1 AND user_id = $2
+       UNION
+       SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
+      [req.params.botId, req.user.userId]
+    );
     
     if (botCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Bot not found' });
