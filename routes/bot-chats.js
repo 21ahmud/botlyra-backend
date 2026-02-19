@@ -9,9 +9,11 @@ router.get('/:botId', authenticateToken, async (req, res) => {
   try {
     // Verify bot ownership
     const botCheck = await query(
-      'SELECT id FROM bots WHERE id = $1 AND user_id = $2',
-      [req.params.botId, req.user.userId]
-    );
+  `SELECT id FROM bots WHERE id = $1 AND user_id = $2
+   UNION
+   SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
+  [req.params.botId, req.user.userId]
+);
     
     if (botCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Bot not found' });
@@ -51,10 +53,12 @@ router.post('/:botId/messages', authenticateToken, async (req, res) => {
     await client.query('BEGIN');
     
     // Verify bot ownership
-    const botCheck = await client.query(
-      'SELECT id FROM bots WHERE id = $1 AND user_id = $2',
-      [req.params.botId, req.user.userId]
-    );
+    const botCheck = await query(
+  `SELECT id FROM bots WHERE id = $1 AND user_id = $2
+   UNION
+   SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
+  [req.params.botId, req.user.userId]
+);
     
     if (botCheck.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -166,9 +170,11 @@ router.delete('/:botId', authenticateToken, async (req, res) => {
   try {
     // Verify bot ownership
     const botCheck = await query(
-      'SELECT id FROM bots WHERE id = $1 AND user_id = $2',
-      [req.params.botId, req.user.userId]
-    );
+  `SELECT id FROM bots WHERE id = $1 AND user_id = $2
+   UNION
+   SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
+  [req.params.botId, req.user.userId]
+);
     
     if (botCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Bot not found' });
