@@ -22,7 +22,7 @@ const getPlanFeatures = (planType) => {
   const features = {
     free: { advanced_analytics: false, unlimited_bots: false, priority_support: false, custom_branding: false, api_access: false, export_data: false, white_label: false, dedicated_support: false, custom_integrations: false, enterprise_security: false, custom_ai: false, global_cdn: false, multi_tenant: false },
     professional: { advanced_analytics: true, unlimited_bots: true, priority_support: true, custom_branding: true, api_access: true, export_data: true, white_label: false, dedicated_support: false, custom_integrations: true, enterprise_security: false, custom_ai: false, global_cdn: false, multi_tenant: false },
-    business: { advanced_analytics: true, unlimited_bots: true, priority_support: true, custom_branding: false, api_access: true, export_data: true, white_label: false, dedicated_support: false, custom_integrations: false, enterprise_security: false, custom_ai: false, global_cdn: false, multi_tenant: false },
+    business: { advanced_analytics: true, unlimited_bots: true, priority_support: true, custom_branding: true, api_access: true, export_data: true, white_label: true, dedicated_support: true, custom_integrations: true, enterprise_security: false, custom_ai: false, global_cdn: false, multi_tenant: false },
     custom: { advanced_analytics: true, unlimited_bots: true, priority_support: true, custom_branding: true, api_access: true, export_data: true, white_label: true, dedicated_support: true, custom_integrations: true, enterprise_security: true, custom_ai: true, global_cdn: true, multi_tenant: true }
   };
   return features[planType] || features.free;
@@ -96,30 +96,57 @@ router.get('/users', authenticateToken, isAdmin, async (req, res) => {
 router.get('/revenue', authenticateToken, isAdmin, async (req, res) => {
   try {
     const result = await query(
-      `SELECT s.plan, s.status, s.custom_price
+      `SELECT s.plan, s.status, s.custom_price, s.created_at
        FROM subscriptions s
        JOIN users u ON u.id = s.user_id
        WHERE s.status = 'active'`
     );
 
-    let totalRevenue = 0;
-    const breakdown = { free: { count: 0, revenue: 0, pricePerUser: 0 }, professional: { count: 0, revenue: 0, pricePerUser: 29 }, business: { count: 0, revenue: 0, pricePerUser: 99 }, custom: { count: 0, revenue: 0, pricePerUser: null } };
+    let totalMonthlyRevenue = 0;
+    let totalAnnualRevenue = 0;
+    const breakdown = { 
+      free: { count: 0, revenue: 0, pricePerUser: 0 }, 
+      professional: { count: 0, revenue: 0, pricePerUser: 29 }, 
+      business: { count: 0, revenue: 0, pricePerUser: 99 }, 
+      custom: { count: 0, revenue: 0, pricePerUser: null } 
+    };
 
     result.rows.forEach(row => {
       const plan = row.plan || 'free';
       if (!breakdown[plan]) return;
       breakdown[plan].count += 1;
 
-      if (plan === 'professional') { breakdown.professional.revenue += 29; totalRevenue += 29; }
-      else if (plan === 'business') { breakdown.business.revenue += 99; totalRevenue += 99; }
+      if (plan === 'professional') { 
+        breakdown.professional.revenue += 29; 
+        totalMonthlyRevenue += 29;
+        totalAnnualRevenue += 29 * 12;
+      }
+      else if (plan === 'business') { 
+        breakdown.business.revenue += 99; 
+        totalMonthlyRevenue += 99;
+        totalAnnualRevenue += 99 * 12;
+      }
       else if (plan === 'custom' && row.custom_price) {
         const price = parseFloat(row.custom_price);
         breakdown.custom.revenue += price;
-        totalRevenue += price;
+        totalMonthlyRevenue += price;
+        totalAnnualRevenue += price * 12;
       }
     });
 
-    res.json({ totalMonthlyRevenue: totalRevenue, breakdown });
+    const monthlyBreakdown = {
+      professional: { count: breakdown.professional.count, revenue: breakdown.professional.revenue },
+      business: { count: breakdown.business.count, revenue: breakdown.business.revenue },
+      custom: { count: breakdown.custom.count, revenue: breakdown.custom.revenue },
+      free: { count: breakdown.free.count, revenue: 0 }
+    };
+
+    res.json({ 
+      totalMonthlyRevenue, 
+      totalAnnualRevenue,
+      monthlyBreakdown,
+      breakdown 
+    });
   } catch (error) {
     console.error('Revenue error:', error);
     res.status(500).json({ error: 'Failed to calculate revenue' });
