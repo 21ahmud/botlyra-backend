@@ -1,6 +1,6 @@
 const express = require('express');
 const { query, getClient } = require('../config/db');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken } = require('./auth');
 
 const router = express.Router();
 
@@ -12,20 +12,19 @@ router.get('/:botId', authenticateToken, async (req, res) => {
        SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
       [req.params.botId, req.user.userId]
     );
-    
+
     if (botCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Bot not found' });
     }
-    
+
     const result = await query(
-      `SELECT id, bot_id, user_id, message, sender, 
-              ai_metadata, created_at
+      `SELECT id, bot_id, user_id, message, sender, ai_metadata, created_at
        FROM bot_chat_messages
        WHERE bot_id = $1 AND user_id = $2
        ORDER BY created_at ASC`,
       [req.params.botId, req.user.userId]
     );
-    
+
     res.json(result.rows);
   } catch (error) {
     console.error('Get bot chat messages error:', error);
@@ -35,39 +34,36 @@ router.get('/:botId', authenticateToken, async (req, res) => {
 
 router.post('/:botId/messages', authenticateToken, async (req, res) => {
   const client = await getClient();
-  
+
   try {
     const { message, sender, aiMetadata } = req.body;
-    
+
     if (!message || !sender) {
       return res.status(400).json({ error: 'Message and sender are required' });
     }
-    
+
     if (!['user', 'bot'].includes(sender)) {
       return res.status(400).json({ error: 'Invalid sender type' });
     }
-    
+
     await client.query('BEGIN');
-    
+
     const botCheck = await client.query(
       `SELECT id FROM bots WHERE id = $1 AND user_id = $2
        UNION
        SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
       [req.params.botId, req.user.userId]
     );
-    
+
     if (botCheck.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Bot not found' });
     }
-    
+
     const result = await client.query(
-      `INSERT INTO bot_chat_messages (
-        bot_id, user_id, message, sender, ai_metadata
-      )
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, bot_id, user_id, message, sender, 
-                ai_metadata, created_at`,
+      `INSERT INTO bot_chat_messages (bot_id, user_id, message, sender, ai_metadata)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, bot_id, user_id, message, sender, ai_metadata, created_at`,
       [
         req.params.botId,
         req.user.userId,
@@ -76,21 +72,21 @@ router.post('/:botId/messages', authenticateToken, async (req, res) => {
         aiMetadata ? JSON.stringify(aiMetadata) : null
       ]
     );
-    
+
     await client.query(
       `UPDATE bots SET message_count = message_count + 1, last_activity_at = CURRENT_TIMESTAMP WHERE id = $1`,
       [req.params.botId]
     );
-    
+
     await client.query(
       `UPDATE custom_bots SET updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
       [req.params.botId]
     );
-    
+
     await client.query('COMMIT');
-    
+
     res.status(201).json(result.rows[0]);
-    
+
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Send message error:', error);
@@ -102,43 +98,40 @@ router.post('/:botId/messages', authenticateToken, async (req, res) => {
 
 router.post('/:botId/initialize', authenticateToken, async (req, res) => {
   const client = await getClient();
-  
+
   try {
     const { botName } = req.body;
-    
+
     await client.query('BEGIN');
-    
+
     const botCheck = await client.query(
       `SELECT id, name FROM bots WHERE id = $1 AND user_id = $2
        UNION
        SELECT id, name FROM custom_bots WHERE id = $1 AND user_id = $2`,
       [req.params.botId, req.user.userId]
     );
-    
+
     if (botCheck.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Bot not found' });
     }
-    
+
     const bot = botCheck.rows[0];
-    
+
     const existingMessages = await client.query(
       'SELECT id FROM bot_chat_messages WHERE bot_id = $1 AND user_id = $2 LIMIT 1',
       [req.params.botId, req.user.userId]
     );
-    
+
     if (existingMessages.rows.length > 0) {
       await client.query('ROLLBACK');
       return res.json({ message: 'Chat already initialized' });
     }
-    
+
     const result = await client.query(
-      `INSERT INTO bot_chat_messages (
-        bot_id, user_id, message, sender, ai_metadata
-      )
-      VALUES ($1, $2, $3, 'bot', $4)
-      RETURNING id, bot_id, user_id, message, sender, 
-                ai_metadata, created_at`,
+      `INSERT INTO bot_chat_messages (bot_id, user_id, message, sender, ai_metadata)
+       VALUES ($1, $2, $3, 'bot', $4)
+       RETURNING id, bot_id, user_id, message, sender, ai_metadata, created_at`,
       [
         req.params.botId,
         req.user.userId,
@@ -146,11 +139,11 @@ router.post('/:botId/initialize', authenticateToken, async (req, res) => {
         JSON.stringify({ model: 'custom', confidence: 1.0, intent: 'greeting' })
       ]
     );
-    
+
     await client.query('COMMIT');
-    
+
     res.status(201).json(result.rows[0]);
-    
+
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Initialize bot chat error:', error);
@@ -168,16 +161,16 @@ router.delete('/:botId', authenticateToken, async (req, res) => {
        SELECT id FROM custom_bots WHERE id = $1 AND user_id = $2`,
       [req.params.botId, req.user.userId]
     );
-    
+
     if (botCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Bot not found' });
     }
-    
+
     await query(
       'DELETE FROM bot_chat_messages WHERE bot_id = $1 AND user_id = $2',
       [req.params.botId, req.user.userId]
     );
-    
+
     res.json({ message: 'Chat history cleared' });
   } catch (error) {
     console.error('Delete bot chat error:', error);
