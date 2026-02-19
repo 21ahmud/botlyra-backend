@@ -1,0 +1,22 @@
+# fly.toml app configuration file generated for botlyra-backend-patient-surf-8181 on 2026-02-19T09:13:10+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'botlyra-backend-patient-surf-8181'
+primary_region = 'cdg'
+
+[build]
+
+[http_service]
+  internal_port = 5000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '2gb'
+  cpus = 4
+  memory_mb = 2048

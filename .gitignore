@@ -1,0 +1,11 @@
+# 2. Create proper .gitignore
+@"
+node_modules/
+.env
+*.log
+venv/
+*.pth
+*.dll
+*.lib
+hello-fly/
+"@ | Out-File -FilePath .gitignore -Encoding utf8 -NoNewline
