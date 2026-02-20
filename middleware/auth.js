@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const headerToken = authHeader && authHeader.split(' ')[1];
+  const headerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
   const cookieToken = req.cookies?.accessToken;
   const token = headerToken || cookieToken;
 
@@ -17,43 +17,24 @@ const authenticateToken = (req, res, next) => {
       }
       return res.status(403).json({ error: 'Invalid or expired token' });
     }
-
-    req.user = {
-      userId: user.userId,
-      uid: user.userId,
-      email: user.email
-    };
+    req.user = { userId: user.userId, uid: user.userId, email: user.email };
     next();
   });
 };
 
 const authorizeRole = (...roles) => {
   return async (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required' });
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    try {
+      const { query } = require('../config/db');
+      const result = await query('SELECT role FROM users WHERE id = $1', [req.user.userId]);
+      if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+      if (!roles.includes(result.rows[0].role)) return res.status(403).json({ error: 'Insufficient permissions' });
+      next();
+    } catch (error) {
+      return res.status(500).json({ error: 'Authorization failed' });
     }
-
-    const { query } = require('../config/db');
-    const result = await query(
-      'SELECT role FROM users WHERE id = $1',
-      [req.user.userId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const userRole = result.rows[0].role;
-
-    if (!roles.includes(userRole)) {
-      return res.status(403).json({ error: 'Insufficient permissions' });
-    }
-
-    next();
   };
 };
 
-module.exports = {
-  authenticateToken,
-  authorizeRole
-};
+module.exports = { authenticateToken, authorizeRole };
