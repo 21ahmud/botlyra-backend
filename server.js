@@ -11,8 +11,15 @@ app.set('trust proxy', 1);
 const PORT = process.env.PORT || 5000;
 
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginOpenerPolicy: false,
 }));
+
+// Disable COOP for the Google callback so popup can communicate with opener
+app.use('/auth/google/callback', (req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+  next();
+});
 
 app.use(cors({
   origin: function (origin, callback) {
@@ -56,7 +63,7 @@ const apiLimiter = rateLimit({
 
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/signup', authLimiter);
-app.use('/api/auth/google', authLimiter); 
+app.use('/api/auth/google', authLimiter);
 app.use('/api/', apiLimiter);
 
 if (process.env.NODE_ENV !== 'production') {
