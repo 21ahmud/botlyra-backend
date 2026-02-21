@@ -56,6 +56,7 @@ const apiLimiter = rateLimit({
 
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/signup', authLimiter);
+app.use('/api/auth/google', authLimiter); 
 app.use('/api/', apiLimiter);
 
 if (process.env.NODE_ENV !== 'production') {
