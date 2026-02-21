@@ -620,6 +620,5 @@ router.get('/me', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to get user data' });
   }
 });
-
 module.exports = router;
 module.exports.authenticateToken = authenticateToken;
