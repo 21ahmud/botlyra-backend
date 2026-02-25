@@ -47,7 +47,6 @@ async function getAIService(botId, userId) {
   };
 
   const aiService = new EnhancedAIService(botConfig);
-  await aiService.initializeModel();
   
   aiServiceCache.set(cacheKey, aiService);
   
@@ -241,19 +240,10 @@ router.post('/:botId/ai-response', authenticateToken, async (req, res) => {
 
     // Get AI response
     const response = await aiService.getAIResponse(message, conversationHistory || []);
-    
-    // Get intent and sentiment for metadata
-    const intent = await aiService.understandIntent(message);
-    const sentiment = aiService.analyzeSentiment(message);
 
     res.json({
-      message: response,
-      metadata: {
-        intent,
-        sentiment,
-        confidence: 0.95,
-        model: 'enhanced-ai'
-      }
+      message: response.text,
+      metadata: response.metadata
     });
 
   } catch (error) {
@@ -266,7 +256,7 @@ router.post('/:botId/initialize', authenticateToken, async (req, res) => {
   const client = await getClient();
 
   try {
-    const { botName, personality, userContext } = req.body;
+    const { botName, userContext } = req.body;
 
     await client.query('BEGIN');
 
@@ -311,46 +301,12 @@ router.post('/:botId/initialize', authenticateToken, async (req, res) => {
         bot: {
           id: bot.id,
           name: bot.name,
-          personality: bot.personality || personality || 'professional',
+          personality: bot.personality || 'professional',
           businessName: bot.business_name || bot.name,
           category: bot.category
         }
       });
     }
-
-    // Generate personalized welcome message based on personality and context
-    const welcomeTemplates = {
-      friendly: {
-        morning: `Good morning! ☀️ I'm ${botName || bot.name}, your friendly AI assistant. How can I brighten your day?`,
-        afternoon: `Hello there! 👋 I'm ${botName || bot.name}. Ready to help with whatever you need!`,
-        evening: `Good evening! 🌙 I'm ${botName || bot.name}. Hope you're having a great day so far!`,
-        default: `Hi! 😊 I'm ${botName || bot.name}. So nice to meet you! What can I help you with today?`
-      },
-      professional: {
-        morning: `Good morning. I am ${botName || bot.name}, your AI assistant. How may I assist you today?`,
-        afternoon: `Good afternoon. This is ${botName || bot.name}. I'm here to help with your business needs.`,
-        evening: `Good evening. I'm ${botName || bot.name}. How can I be of service?`,
-        default: `Welcome. I am ${botName || bot.name}, your AI assistant. Please let me know how I can help.`
-      },
-      witty: {
-        morning: `Rise and shine! 🌅 I'm ${botName || bot.name}, ready to tackle your questions with wit and wisdom!`,
-        afternoon: `Well, well, well... look who's here! 😎 I'm ${botName || bot.name}. Ready for an interesting conversation?`,
-        evening: `The stars are out and so am I! ⭐ I'm ${botName || bot.name}. What's on your mind?`,
-        default: `Hey there! 🎯 I'm ${botName || bot.name}. Let's make this conversation memorable!`
-      }
-    };
-
-    const botPersonality = bot.personality || personality || 'professional';
-    const hour = new Date().getHours();
-    let timeOfDay = 'default';
-    
-    if (hour >= 5 && hour < 12) timeOfDay = 'morning';
-    else if (hour >= 12 && hour < 18) timeOfDay = 'afternoon';
-    else if (hour >= 18 || hour < 5) timeOfDay = 'evening';
-
-    const template = welcomeTemplates[botPersonality]?.[timeOfDay] || 
-                     welcomeTemplates[botPersonality]?.default ||
-                     `Hello! I'm ${botName || bot.name}, your AI assistant. How can I help you today?`;
 
     // Create conversation record
     const convResult = await client.query(
@@ -358,29 +314,9 @@ router.post('/:botId/initialize', authenticateToken, async (req, res) => {
        VALUES ($1, $2, 'active', $3)
        RETURNING id`,
       [req.params.botId, req.user.userId, JSON.stringify({ 
-        personality: botPersonality,
         startedAt: new Date().toISOString(),
         userContext: userContext || {}
       })]
-    );
-
-    // Insert welcome message
-    const messageResult = await client.query(
-      `INSERT INTO bot_chat_messages (
-        bot_id, user_id, message, sender, ai_metadata, created_at
-       )
-       VALUES ($1, $2, $3, 'bot', $4, CURRENT_TIMESTAMP)
-       RETURNING id, message, created_at`,
-      [
-        req.params.botId,
-        req.user.userId,
-        template,
-        JSON.stringify({ 
-          type: 'welcome', 
-          personality: botPersonality,
-          confidence: 1.0 
-        })
-      ]
     );
 
     await client.query('COMMIT');
@@ -393,11 +329,10 @@ router.post('/:botId/initialize', authenticateToken, async (req, res) => {
 
     res.status(201).json({
       conversationId: convResult.rows[0].id,
-      welcomeMessage: messageResult.rows[0],
       bot: {
         id: bot.id,
         name: bot.name,
-        personality: botPersonality,
+        personality: bot.personality || 'professional',
         businessName: bot.business_name || bot.name,
         category: bot.category,
         description: bot.description
@@ -446,131 +381,26 @@ router.post('/:botId/messages/:messageId/reaction', authenticateToken, async (re
   }
 });
 
-router.get('/:botId/summary', authenticateToken, async (req, res) => {
-  try {
-    const result = await query(
-      `SELECT 
-        COUNT(*) as total_messages,
-        COUNT(DISTINCT sender) as participants,
-        MIN(created_at) as first_message,
-        MAX(created_at) as last_message,
-        json_agg(DISTINCT sender) as senders,
-        AVG(CASE WHEN sentiment_score IS NOT NULL THEN sentiment_score END) as avg_sentiment,
-        COUNT(CASE WHEN sender = 'user' THEN 1 END) as user_messages,
-        COUNT(CASE WHEN sender = 'bot' THEN 1 END) as bot_messages
-      FROM bot_chat_messages
-      WHERE bot_id = $1 AND user_id = $2`,
-      [req.params.botId, req.user.userId]
-    );
-
-    // Get reaction counts
-    const reactionsResult = await query(
-      `SELECT 
-        jsonb_object_keys(reactions) as reaction_type,
-        COUNT(*) as count
-      FROM bot_chat_messages
-      WHERE bot_id = $1 AND user_id = $2 AND reactions IS NOT NULL
-      GROUP BY reaction_type`,
-      [req.params.botId, req.user.userId]
-    );
-
-    const summary = result.rows[0];
-    summary.reactions = reactionsResult.rows.reduce((acc, row) => {
-      acc[row.reaction_type] = parseInt(row.count);
-      return acc;
-    }, {});
-
-    res.json(summary);
-
-  } catch (error) {
-    console.error('Get chat summary error:', error);
-    res.status(500).json({ error: 'Failed to get summary' });
-  }
-});
-
 router.get('/:botId/suggestions', authenticateToken, async (req, res) => {
   try {
-    const botCheck = await query(
-      `SELECT category, business_type FROM (
-         SELECT category, business_type FROM bots WHERE id = $1
-         UNION
-         SELECT category, business_type FROM custom_bots WHERE id = $1
-       ) b`,
-      [req.params.botId]
-    );
-
-    if (botCheck.rows.length === 0) {
+    const aiService = await getAIService(req.params.botId, req.user.userId);
+    
+    if (!aiService) {
       return res.status(404).json({ error: 'Bot not found' });
     }
 
-    const bot = botCheck.rows[0];
-    const category = bot.category || bot.business_type || 'general';
-
-    const suggestionsByCategory = {
-      general: [
-        "What services do you offer?",
-        "How can you help me?",
-        "Tell me about your company",
-        "What are your hours?",
-        "How do I contact support?"
-      ],
-      business: [
-        "What's your pricing?",
-        "Do you offer consultations?",
-        "Can you provide case studies?",
-        "What industries do you serve?",
-        "Do you have a free trial?"
-      ],
-      technology: [
-        "What tech stack do you use?",
-        "Do you offer API access?",
-        "Is it secure?",
-        "Can you integrate with other tools?",
-        "What's your uptime guarantee?"
-      ],
-      marketing: [
-        "What marketing services do you offer?",
-        "How do you measure ROI?",
-        "Can you help with SEO?",
-        "Do you manage social media?",
-        "What's your content strategy?"
-      ],
-      ecommerce: [
-        "How do I set up a store?",
-        "What payment methods do you accept?",
-        "Do you handle shipping?",
-        "Can you manage inventory?",
-        "What's your return policy?"
-      ],
-      consulting: [
-        "What's your consulting process?",
-        "How long are engagements?",
-        "What's your success rate?",
-        "Can you provide references?",
-        "Do you offer ongoing support?"
-      ]
-    };
-
-    const suggestions = suggestionsByCategory[category.toLowerCase()] || suggestionsByCategory.general;
-
-    // Get popular questions from this bot's history
-    const popularQuestions = await query(
-      `SELECT message, COUNT(*) as frequency
-       FROM bot_chat_messages
-       WHERE bot_id = $1 AND sender = 'user'
-       GROUP BY message
-       ORDER BY frequency DESC
-       LIMIT 3`,
-      [req.params.botId]
+    // Get conversation history for context
+    const historyResult = await query(
+      `SELECT message, sender 
+       FROM bot_chat_messages 
+       WHERE bot_id = $1 AND user_id = $2 
+       ORDER BY created_at DESC LIMIT 10`,
+      [req.params.botId, req.user.userId]
     );
 
-    const popular = popularQuestions.rows.map(q => q.message);
+    const suggestions = aiService.getSuggestions(historyResult.rows);
 
-    res.json({
-      categoryBased: suggestions,
-      popular: popular,
-      all: [...new Set([...suggestions, ...popular])].slice(0, 8)
-    });
+    res.json({ suggestions });
 
   } catch (error) {
     console.error('Get suggestions error:', error);
@@ -627,43 +457,6 @@ router.delete('/:botId', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to delete chat' });
   } finally {
     client.release();
-  }
-});
-
-router.post('/:botId/export', authenticateToken, async (req, res) => {
-  try {
-    const { format = 'json' } = req.body;
-
-    const messages = await query(
-      `SELECT message, sender, ai_metadata, sentiment_score, created_at
-       FROM bot_chat_messages
-       WHERE bot_id = $1 AND user_id = $2
-       ORDER BY created_at ASC`,
-      [req.params.botId, req.user.userId]
-    );
-
-    if (format === 'csv') {
-      const csv = messages.rows.map(row => {
-        return `${row.created_at},${row.sender},"${row.message.replace(/"/g, '""')}",${row.sentiment_score || ''}`;
-      }).join('\n');
-
-      const header = 'Timestamp,Sender,Message,Sentiment Score\n';
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename=chat-${req.params.botId}.csv`);
-      res.send(header + csv);
-    } else {
-      res.json({
-        botId: req.params.botId,
-        userId: req.user.userId,
-        exportedAt: new Date().toISOString(),
-        totalMessages: messages.rows.length,
-        messages: messages.rows
-      });
-    }
-
-  } catch (error) {
-    console.error('Export chat error:', error);
-    res.status(500).json({ error: 'Failed to export chat' });
   }
 });
 
